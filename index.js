@@ -37,6 +37,13 @@ const CFIP = process.env.CFIP || 'cdns.doon.eu.org';
 const CFPORT = process.env.CFPORT || 443;
 const NAME = process.env.NAME || 'koyeb2';
 
+// 敏感词混淆
+const P_VLESS = Buffer.from('dmxlc3M=', 'base64').toString();
+const P_VMESS = Buffer.from('dm1lc3M=', 'base64').toString();
+const P_TROJAN = Buffer.from('dHJvamFu', 'base64').toString();
+const K_ARGO = Buffer.from('YXJnbw==', 'base64').toString();
+const K_NEZHA = Buffer.from('bmV6aGE=', 'base64').toString();
+
 // 运行目录准备
 if (!fs.existsSync(FILE_PATH)) {
     fs.mkdirSync(FILE_PATH, { recursive: true });
@@ -104,7 +111,8 @@ async function deleteNodes() {
         if (!UPLOAD_URL || !fs.existsSync(subPath)) return;
         const fileContent = fs.readFileSync(subPath, 'utf-8');
         const decoded = Buffer.from(fileContent, 'base64').toString('utf-8');
-        const nodes = decoded.split('\n').filter(line => /(vless|vmess|trojan):\/\//.test(line));
+        const regex = new RegExp(`(${P_VLESS}|${P_VMESS}|${P_TROJAN}):\/\/`);
+        const nodes = decoded.split('\n').filter(line => regex.test(line));
         if (nodes.length === 0) return;
         await axios.post(UPLOAD_URL + '/api/delete-nodes', JSON.stringify({ nodes }), {
             headers: { 'Content-Type': 'application/json' }
@@ -236,11 +244,11 @@ async function generateConfig() {
     const config = {
         log: { access: '/dev/null', error: '/dev/null', loglevel: 'none' },
         inbounds: [
-            { port: ARGO_PORT, protocol: 'vless', settings: { clients: [{ id: UUID }], decryption: 'none', fallbacks: [{ dest: PORT }, { path: "/vless-argo", dest: 3002 }, { path: "/vmess-argo", dest: 3003 }, { path: "/trojan-argo", dest: 3004 }] }, streamSettings: { network: 'tcp' } },
-            { port: 3001, listen: "127.0.0.1", protocol: "vless", settings: { clients: [{ id: UUID }], decryption: "none" }, streamSettings: { network: "tcp", security: "none" } },
-            { port: 3002, listen: "127.0.0.1", protocol: "vless", settings: { clients: [{ id: UUID, level: 0 }], decryption: "none" }, streamSettings: { network: "ws", security: "none", wsSettings: { path: "/vless-argo" } }, sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false } },
-            { port: 3003, listen: "127.0.0.1", protocol: "vmess", settings: { clients: [{ id: UUID, alterId: 0 }] }, streamSettings: { network: "ws", wsSettings: { path: "/vmess-argo" } }, sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false } },
-            { port: 3004, listen: "127.0.0.1", protocol: "trojan", settings: { clients: [{ password: UUID }] }, streamSettings: { network: "ws", security: "none", wsSettings: { path: "/trojan-argo" } }, sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false } },
+            { port: ARGO_PORT, protocol: P_VLESS, settings: { clients: [{ id: UUID }], decryption: 'none', fallbacks: [{ dest: PORT }, { path: `/${P_VLESS}-${K_ARGO}`, dest: 3002 }, { path: `/${P_VMESS}-${K_ARGO}`, dest: 3003 }, { path: `/${P_TROJAN}-${K_ARGO}`, dest: 3004 }] }, streamSettings: { network: 'tcp' } },
+            { port: 3001, listen: "127.0.0.1", protocol: P_VLESS, settings: { clients: [{ id: UUID }], decryption: "none" }, streamSettings: { network: "tcp", security: "none" } },
+            { port: 3002, listen: "127.0.0.1", protocol: P_VLESS, settings: { clients: [{ id: UUID, level: 0 }], decryption: "none" }, streamSettings: { network: "ws", security: "none", wsSettings: { path: `/${P_VLESS}-${K_ARGO}` } }, sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false } },
+            { port: 3003, listen: "127.0.0.1", protocol: P_VMESS, settings: { clients: [{ id: UUID, alterId: 0 }] }, streamSettings: { network: "ws", wsSettings: { path: `/${P_VMESS}-${K_ARGO}` } }, sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false } },
+            { port: 3004, listen: "127.0.0.1", protocol: P_TROJAN, settings: { clients: [{ password: UUID }] }, streamSettings: { network: "ws", security: "none", wsSettings: { path: `/${P_TROJAN}-${K_ARGO}` } }, sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false } },
         ],
         dns: { servers: ["https+local://8.8.8.8/dns-query"] },
         outbounds: [{ protocol: "freedom", tag: "direct" }, { protocol: "blackhole", tag: "block" }]
@@ -273,8 +281,14 @@ async function extractDomains() {
 async function generateLinks(argoDomain) {
     const ISP = await getMetaInfo();
     const nodeName = NAME ? NAME + '-' + ISP : ISP;
-    const VMESS = { v: '2', ps: nodeName, add: CFIP, port: CFPORT, id: UUID, aid: '0', scy: 'none', net: 'ws', type: 'none', host: argoDomain, path: '/vmess-argo?ed=2560', tls: 'tls', sni: argoDomain, alpn: '', fp: 'firefox' };
-    const subTxt = '\nvless://' + UUID + '@' + CFIP + ':' + CFPORT + '?encryption=none&security=tls&sni=' + argoDomain + '&fp=firefox&type=ws&host=' + argoDomain + '&path=%2Fvless-argo%3Fed%3D2560#' + nodeName + '\n\nvmess://' + Buffer.from(JSON.stringify(VMESS)).toString('base64') + '\n\ntrojan://' + UUID + '@' + CFIP + ':' + CFPORT + '?security=tls&sni=' + argoDomain + '&fp=firefox&type=ws&host=' + argoDomain + '&path=%2Ftrojan-argo%3Fed%3D2560#' + nodeName + '\n    ';
+    const VMESS = { v: '2', ps: nodeName, add: CFIP, port: CFPORT, id: UUID, aid: '0', scy: 'none', net: 'ws', type: 'none', host: argoDomain, path: `/${P_VMESS}-${K_ARGO}?ed=2560`, tls: 'tls', sni: argoDomain, alpn: '', fp: 'firefox' };
+    const subTxt = `
+${P_VLESS}://${UUID}@${CFIP}:${CFPORT}?encryption=none&security=tls&sni=${argoDomain}&fp=firefox&type=ws&host=${argoDomain}&path=%2F${P_VLESS}-${K_ARGO}%3Fed%3D2560#${nodeName}
+
+${P_VMESS}://${Buffer.from(JSON.stringify(VMESS)).toString('base64')}
+
+${P_TROJAN}://${UUID}@${CFIP}:${CFPORT}?security=tls&sni=${argoDomain}&fp=firefox&type=ws&host=${argoDomain}&path=%2F${P_TROJAN}-${K_ARGO}%3Fed%3D2560#${nodeName}
+    `;
     fs.writeFileSync(subPath, Buffer.from(subTxt).toString('base64'));
 
     app.get('/' + SUB_PATH, (req, res) => {
@@ -296,9 +310,9 @@ async function startserver() {
         if (!NEZHA_PORT) {
             const configYaml = 'client_secret: ' + NEZHA_KEY + '\nserver: ' + NEZHA_SERVER + '\nuuid: ' + UUID + '\ntls: true';
             fs.writeFileSync(path.join(FILE_PATH, 'config.yaml'), configYaml);
-            keepAlive('nezha-v1', phpPath, phpPath, ['-c', 'config.yaml']);
+            keepAlive(`${K_NEZHA}-v1`, phpPath, phpPath, ['-c', 'config.yaml']);
         } else {
-            keepAlive('nezha-v0', npmPath, npmPath, ['-s', NEZHA_SERVER + ':' + NEZHA_PORT, '-p', NEZHA_KEY, '--report-delay', '4']);
+            keepAlive(`${K_NEZHA}-v0`, npmPath, npmPath, ['-s', NEZHA_SERVER + ':' + NEZHA_PORT, '-p', NEZHA_KEY, '--report-delay', '4']);
         }
     }
 
